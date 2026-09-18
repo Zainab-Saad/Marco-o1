@@ -25,22 +25,34 @@ class MCTS_Engine():
             self.evaluate_func = globals()[evaluator_name]
         else:
             raise ValueError(f"Invalid evaluate_func: {args.evaluate_func}")
+        self.tokenizer = args.tokenizer
+        self.temperature = args.temperature
+        self.top_p = args.top_p
+        self.top_k = args.top_k
+        self.seed = args.seed
+        self.generations_used = 0
+        self.problem_idx = 0
 
-        if generate_func == 'api':
-            from tree_search.utils.model_IO.openAI_API import generate_with_api_model, load_api_model
-            self.model = load_api_model()
-            self.generate_func = generate_with_api_model
-        elif generate_func == 'hf':
-            from tree_search.utils.model_IO.hf_API import generate_with_hf_model, load_hf_model
-            self.tokenizer, self.model = load_hf_model()
-            self.generate_func = generate_with_hf_model
-        elif generate_func == 'vLLM':
-            from tree_search.utils.model_IO.vLLM_API import generate_with_vLLM_model, load_vLLM_model
-            self.tokenizer, self.model = load_vLLM_model()
-            self.generate_func = generate_with_vLLM_model
-        elif generate_func == 'local':
-            from tree_search.utils.model_IO.local_http_API import get_response
+        if generate_func == 'vllm_server':
+            from tree_search.utils.model_IO.vllm_server_API import get_response
             self.generate_func = get_response
+
+        #  commenting it out for now for testing with vllm server
+        # if generate_func == 'api':
+        #     from tree_search.utils.model_IO.openAI_API import generate_with_api_model, load_api_model
+        #     self.model = load_api_model()
+        #     self.generate_func = generate_with_api_model
+        # elif generate_func == 'hf':
+        #     from tree_search.utils.model_IO.hf_API import generate_with_hf_model, load_hf_model
+        #     self.tokenizer, self.model = load_hf_model()
+        #     self.generate_func = generate_with_hf_model
+        # elif generate_func == 'vLLM':
+        #     from tree_search.utils.model_IO.vLLM_API import generate_with_vLLM_model, load_vLLM_model
+        #     self.tokenizer, self.model = load_vLLM_model()
+        #     self.generate_func = generate_with_vLLM_model
+        # elif generate_func == 'local':
+        #     from tree_search.utils.model_IO.local_http_API import get_response
+        #     self.generate_func = get_response
         else:
             raise ValueError(f"Invalid generate_func: {generate_func}")
 
@@ -69,6 +81,7 @@ class MCTS_Engine():
         final_correct_answer = ''
         total_reward = 0
 
+        # not using it, thats for agentic maybe??
         if self.args.use_multi_turn:
             original_question = question_dict['conversation'][0]['content']
             question = "%s%s" % (self.args.base_prompt, original_question)
@@ -83,9 +96,15 @@ class MCTS_Engine():
                 else:
                     self.args.mask_asking = True
         else:
+            # original_question = question_dict['problem']
+            # question = "%s%s" % (self.args.base_prompt, original_question)
+            # ground_truth = question_dict['solution']
             original_question = question_dict['problem']
-            question = "%s%s" % (self.args.base_prompt, original_question)
+            question = question_dict['prompt']
             ground_truth = question_dict['solution']
+        self.problem_idx = question_dict['problem_idx']
+        self.generations_used = 0
+
         root = BaseNode(parent=None)
         root.user_question = question
         root.node_value = original_question
@@ -103,9 +122,11 @@ class MCTS_Engine():
             print('mask_asking:', self.args.mask_asking, flush=True)
 
         while True:
-            print(f'rollout {cur_rollout_id} start: ', flush=True)
+            if self.mode == 'debug':
+                print(f'rollout {cur_rollout_id} start: ', flush=True)
             node = self.do_selection(root)
             reward = self.get_rollout_reward(node, ground_truth)
+            node.reward = reward
             self.do_backpropagation(node, reward)
 
             # log wrong answer and add special node for wrong answer
@@ -117,9 +138,13 @@ class MCTS_Engine():
                 final_correct_answer = node.all_path_value
             total_reward += reward
 
-            print(f'currect total node num: {NodeCounter._id_counter}', flush=True)
+            if self.mode == 'debug':
+                print(f'currect total node num: {root._id_state[0]}', flush=True)
 
             # compute out condition
+            if self.generations_used >= self.args.max_generations:
+                search_success = total_reward >= self.args.search_reward_threshold[0]
+                break
             if cur_rollout_id > self.args.max_rollout_time * 4 and total_reward < self.args.search_reward_threshold[0]:
                 break
             if cur_rollout_id > self.args.max_rollout_time and total_reward >= self.args.search_reward_threshold[0]:
@@ -137,7 +162,11 @@ class MCTS_Engine():
         if self.output_tree:
             self.print_tree(root, question_dict['id'], final_correct_answer, final_wrong_answer,
                             question_dict['solution'], search_success)
-        return best_child[-1], search_success
+        # return best_child[-1], search_success
+
+        return {'search_success': search_success, 'n_correct': total_reward,
+                'n_rollouts': cur_rollout_id + 1, 'generations_used': self.generations_used,
+                'n_nodes': root._id_state[0]}
 
     def do_backpropagation(self, node, reward):
         while node is not None:
@@ -245,10 +274,21 @@ class MCTS_Engine():
         else:
             tools = None
 
-        end_tokens = node.node_action_description[-1] if self.args.use_tag else '<|im_end|>'
+        # end_tokens = node.node_action_description[-1] if self.args.use_tag else '<|im_end|>'
+        # output_text = self.generate_func(user_question=user_question, history_text=history_text,
+        #                                  max_tokens=self.max_new_tokens, n=n, end_tokens=end_tokens,
+        #                                  special_model=special_model, tools=tools)
+
+        # TODO: changes will be made here for switching between thinking and non thinking mode
+        # firstly im gonna run with thinking mode for comparability although the original paper used qwen2.5 which didnt have thinking mode...
+        # might also later try with non thinking mode later but for fair comparison with my implementation, we need thinking mode (TODO)
+        end_tokens = [node.node_action_description[-1], '</think>'] if self.args.use_tag else ['<|im_end|>']
+        seed = self.seed + self.problem_idx * 100003 + self.generations_used
+        self.generations_used += n
         output_text = self.generate_func(user_question=user_question, history_text=history_text,
-                                         max_tokens=self.max_new_tokens, n=n, end_tokens=end_tokens,
-                                         special_model=special_model, tools=tools)
+                                        max_tokens=self.max_new_tokens, n=n, end_tokens=end_tokens,
+                                        temperature=self.temperature, top_p=self.top_p,
+                                        top_k=self.top_k, seed=seed)
 
         # add to node_post_init
 
@@ -263,12 +303,22 @@ class MCTS_Engine():
         return output_text
 
     def get_actions(self, node):
-        if node.node_action_name == 'evaluate' and node.node_value.count('True') > 1:
-            return {'answer': 1}
-        if node.node_action_name in self.action_tree:
-            return self.action_tree[node.node_action_name]
-        else:
+        # if node.node_action_name == 'evaluate' and node.node_value.count('True') > 1:
+        #     return {'answer': 1}
+        # if node.node_action_name in self.action_tree:
+        #     return self.action_tree[node.node_action_name]
+        # else:
+        #     raise ValueError(f"Invalid node action name: {node.node_action_name}")
+
+        if node.node_action_name not in self.action_tree:
             raise ValueError(f"Invalid node action name: {node.node_action_name}")
+        actions = dict(self.action_tree[node.node_action_name])
+        chain_tokens = len(self.tokenizer(node.all_path_value, add_special_tokens=False)['input_ids'])
+        if node.getDepth() >= self.args.max_depth or chain_tokens >= self.args.max_chain_tokens:
+            actions.pop('thinking', None)
+            if not actions:
+                actions = {'answer': 1}
+        return actions
 
     def get_best_child(self, node, explorationValue):
         """

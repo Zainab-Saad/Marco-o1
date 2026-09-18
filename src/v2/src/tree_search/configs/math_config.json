@@ -1,0 +1,75 @@
+{
+    "desc": "MATH L1-L5 Marco-style MCTS with Qwen3-32B",
+    "mode": "run",
+    "teacher_model": "Qwen/Qwen3-32B",
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "seed": 0,
+    "max_tokens": 2048,
+    "max_chain_tokens": 12288,
+    "max_depth": 8,
+    "max_generations": 60,
+    "max_rollout_time": 32,
+    "search_reward_threshold": [4, 8],
+    "output_tree": true,
+    "output_folder": "marco_math",
+    "generate_func": "vllm_server",
+    "evaluate_func": "math",
+    "use_for_wrong_answer": {"double_check": {"reflection": 1}},
+    "use_mini_step": false,
+    "use_function_call": false,
+    "use_step": false,
+    "tag_instructions": "Now you need to solve a math problem.\nFirst, you need to break down the task in <sub-task>, and your breakdown should be as detailed as possible, considering verification and correction.\nIn <thinking>, you need to complete the tasks broken down in sub-task, with one sub-task per <thinking>. For example, if you break down into 3 sub-tasks, you need to output 3 <thinking> to complete each of these steps. You need to think carefully and show every calculation.\nIn <double-check>, ensure that the steps in <thinking> are correct, including but not limited to algebra and arithmetic. If you find errors, you need to clearly point them out.\nIn <reflection>, correct your mistakes and provide the correct answer.\nIn <answer>, output your final answer inside \\boxed{}.\nNote that these tags cannot be nested, but they can be sequential, so try to keep actions within tags atomic.",
+    "action_tree": {
+        "base": {
+            "prefill_text": [],
+            "description": "User Question",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"sub_task": 2}
+        },
+        "sub_task": {
+            "prefill_text": ["Firstly, I need to break down this problem.\n- 1.", "Ok, I need to think step by step.\n- 1.", "Alright, I need to break down this problem.\n- 1."],
+            "description": "Split the task into sub-tasks",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"thinking": 2}
+        },
+        "thinking": {
+            "prefill_text": [],
+            "description": "Think in detail",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"double_check": 2, "thinking": 2}
+        },
+        "double_check": {
+            "prefill_text": ["Let's check the result", "Now I need to double check the result", "Time to double check the result", "Let's check for some errors or typos."],
+            "description": "Double check the result",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"answer": 1}
+        },
+        "reflection": {
+            "prefill_text": ["Wait! something is wrong, let's think again.\n</reflection>", "Halt! I made a fatal mistake that made me rethink\n</reflection>"],
+            "description": "Reflect on the result",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"thinking_from_scratch": 2}
+        },
+        "thinking_from_scratch": {
+            "prefill_text": ["Now, I need to think carefully. I need to ignore the previous output, it's wrong.\nI need", "The previous is the wrong answer, I need to rethink this question.\n"],
+            "description": "Think from scratch",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {"thinking": 2}
+        },
+        "answer": {
+            "prefill_text": ["The answer is:"],
+            "description": "Answer the question",
+            "show_in_history": true,
+            "special_model": false,
+            "next_step": {}
+        }
+    }
+}

@@ -1,15 +1,16 @@
 import re
 import json
-
+from tree_search.data import math_extract_answer, math_answers_match
 
 def planning_evaluator(answer_node_value, ground_truth):
     # Todo your code here
     return True
 
 
-def math_evaluator(answer_node_value, ground_truth):
-    # Todo your code here
-    return True
+def math_evaluator(answer_node, ground_truth):
+    pred = math_extract_answer(answer_node.node_value)
+    answer_node.predicted_answer = pred
+    return 1 if math_answers_match(pred, ground_truth) else 0
 
 
 def count_latter_evaluator(answer_node, ground_truth):

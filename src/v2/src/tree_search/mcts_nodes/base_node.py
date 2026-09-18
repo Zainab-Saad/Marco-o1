@@ -38,10 +38,15 @@ class BaseNode():
         self.other_info = {}
         self.children_ids = []
 
-        if type(self) == BaseNode:
-            NodeCounter.set_to_zero()
+        # if type(self) == BaseNode:
+        #     NodeCounter.set_to_zero()
 
-        self.node_id = NodeCounter.get_next_id()
+        # self.node_id = NodeCounter.get_next_id()
+
+        # just changed this coz of threading
+        self._id_state = [0] if parent is None else parent._id_state
+        self._id_state[0] += 1
+        self.node_id = self._id_state[0]
 
     def addChild(self, action, childNode):
         """添加子节点"""
@@ -99,4 +104,6 @@ class BaseNode():
             'node_value': self.node_value,
             "children_ids": self.children_ids,
             'info': self.other_info,
+            'reward': getattr(self, 'reward', None),
+            'predicted_answer': getattr(self, 'predicted_answer', None),
         }
